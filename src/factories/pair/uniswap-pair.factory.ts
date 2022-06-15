@@ -1,30 +1,36 @@
-import BigNumber from 'bignumber.js';
-import { Subject } from 'rxjs';
-import { CoinGecko } from '../../coin-gecko';
-import { Constants } from '../../common/constants';
-import { ErrorCodes } from '../../common/errors/error-codes';
-import { UniswapError } from '../../common/errors/uniswap-error';
+import Big from "big.js";
+import BigNumber from "bignumber.js";
+import { Subject } from "rxjs";
+import { CoinGecko } from "../../coin-gecko";
+import { Constants } from "../../common/constants";
+import { ErrorCodes } from "../../common/errors/error-codes";
+import { UniswapError } from "../../common/errors/uniswap-error";
 import {
   removeEthFromContractAddress,
   turnTokenIntoEthForResponse,
-} from '../../common/tokens/eth';
-import { deepClone } from '../../common/utils/deep-clone';
-import { getTradePath } from '../../common/utils/trade-path';
-import { TradePath } from '../../enums/trade-path';
-import { UniswapVersion } from '../../enums/uniswap-version';
-import { uniswapContracts } from '../../uniswap-contract-context/get-uniswap-contracts';
-import { AllPossibleRoutes } from '../router/models/all-possible-routes';
-import { BestRouteQuotes } from '../router/models/best-route-quotes';
-import { RouteQuote } from '../router/models/route-quote';
-import { UniswapRouterFactory } from '../router/uniswap-router.factory';
-import { AllowanceAndBalanceOf } from '../token/models/allowance-balance-of';
-import { Token } from '../token/models/token';
-import { TokenFactory } from '../token/token.factory';
-import { CurrentTradeContext } from './models/current-trade-context';
-import { TradeContext } from './models/trade-context';
-import { TradeDirection } from './models/trade-direction';
-import { Transaction } from './models/transaction';
-import { UniswapPairFactoryContext } from './models/uniswap-pair-factory-context';
+} from "../../common/tokens/eth";
+import { deepClone } from "../../common/utils/deep-clone";
+import { getTradePath } from "../../common/utils/trade-path";
+import { TradePath } from "../../enums/trade-path";
+import { UniswapVersion } from "../../enums/uniswap-version";
+import { uniswapContracts } from "../../uniswap-contract-context/get-uniswap-contracts";
+import { AllPossibleRoutes } from "../router/models/all-possible-routes";
+import { BestRouteQuotes } from "../router/models/best-route-quotes";
+import { RouteQuote } from "../router/models/route-quote";
+import { UniswapRouterFactory } from "../router/uniswap-router.factory";
+import { AllowanceAndBalanceOf } from "../token/models/allowance-balance-of";
+import { Token } from "../token/models/token";
+import { TokenFactory } from "../token/token.factory";
+import { CurrentTradeContext } from "./models/current-trade-context";
+import { TradeContext } from "./models/trade-context";
+import { TradeDirection } from "./models/trade-direction";
+import { Transaction } from "./models/transaction";
+import { UniswapPairFactoryContext } from "./models/uniswap-pair-factory-context";
+import { UniswapPairContractFactoryPublicV2 } from "./v2/uniswap-pair-contract.factory.public.v2";
+import {
+  PairReserves,
+  UniswapPairContractV2,
+} from "./v2/uniswap-pair-contract.v2";
 
 export class UniswapPairFactory {
   private _fromTokenFactory = new TokenFactory(
@@ -234,7 +240,7 @@ export class UniswapPairFactory {
    */
   public async allowance(uniswapVersion: UniswapVersion): Promise<string> {
     if (this.tradePath() === TradePath.ethToErc20) {
-      return '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+      return "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
     }
 
     const allowance = await this._fromTokenFactory.allowance(
@@ -255,7 +261,7 @@ export class UniswapPairFactory {
   ): Promise<Transaction> {
     if (this.tradePath() === TradePath.ethToErc20) {
       throw new UniswapError(
-        'You do not need to generate approve uniswap allowance when doing eth > erc20',
+        "You do not need to generate approve uniswap allowance when doing eth > erc20",
         ErrorCodes.generateApproveMaxAllowanceDataNotAllowed
       );
     }
@@ -268,7 +274,7 @@ export class UniswapPairFactory {
         : uniswapContracts.v3.getRouterAddress(
             this._uniswapPairFactoryContext.settings.cloneUniswapContractDetails
           ),
-      '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+      "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     );
 
     return {
@@ -302,6 +308,68 @@ export class UniswapPairFactory {
       routeText: trade.routeText,
       tradeExpires: trade.tradeExpires,
     });
+  }
+
+  private async getPairReserves(
+    fromToken: string,
+    toToken: string
+  ): Promise<PairReserves> {
+    const network = this._uniswapPairFactoryContext.ethersProvider.network();
+    const pairFactory = new UniswapPairContractFactoryPublicV2({
+      chainId: network.chainId,
+    });
+
+    const pairAddress = await pairFactory.getPair(fromToken, toToken);
+
+    const pairContract = new UniswapPairContractV2(
+      this._uniswapPairFactoryContext.ethersProvider,
+      pairAddress
+    );
+
+    return pairContract.getReserves();
+  }
+
+  private calculateTrade(
+    poolA: BigNumber,
+    poolB: BigNumber,
+    tradeInput: BigNumber
+  ) {
+    const _poolA = new Big(poolA.toString());
+    const _poolB = new Big(poolB.toString());
+    const input = new Big(tradeInput.toString());
+
+    // constant prduct is the starting value of the A side of the pool
+    const CP = new Big(_poolA.toString());
+
+    const marketPrice = _poolA.div(_poolB);
+    const newPoolA = _poolA.add(input);
+    const newPoolB = CP.div(newPoolA).mul(_poolB);
+    const recieve = _poolB.sub(newPoolB);
+    const newMarketPrice = input.div(recieve);
+
+    const priceDifference = newMarketPrice.sub(marketPrice);
+
+    const priceImpact = priceDifference.div(marketPrice).mul(100);
+
+    return {
+      oldMarketPrice: marketPrice,
+      newMarketPrice: newMarketPrice,
+      recieve: recieve,
+      priceImpact: priceImpact,
+    };
+  }
+
+  public async newTradeCalculator(fromToken: string, toToken: string) {
+    const reserves = await this.getPairReserves(fromToken, toToken);
+    return (from: string, to: string, tradeInput: BigNumber) => {
+      // you can change the order of the token addresses
+      // but cannot use different tokens
+      if (!reserves[from] || !reserves[to]) {
+        throw new Error("unknown token address");
+      }
+
+      this.calculateTrade(reserves[from], reserves[to], tradeInput);
+    };
   }
 
   /**
@@ -528,7 +596,7 @@ export class UniswapPairFactory {
   private watchTradePrice(): void {
     if (!this._watchingBlocks) {
       this._uniswapPairFactoryContext.ethersProvider.provider.on(
-        'block',
+        "block",
         async () => {
           await this.handleNewBlock();
         }
@@ -542,7 +610,7 @@ export class UniswapPairFactory {
    */
   private unwatchTradePrice(): void {
     this._uniswapPairFactoryContext.ethersProvider.provider.removeAllListeners(
-      'block'
+      "block"
     );
     this._watchingBlocks = false;
   }
@@ -558,19 +626,26 @@ export class UniswapPairFactory {
       );
 
       if (
+        // validate from address matches
         trade.fromToken.contractAddress ===
           this._currentTradeContext.fromToken.contractAddress &&
+        // validate to address matches
         trade.toToken.contractAddress ===
           this._currentTradeContext.toToken.contractAddress &&
+        // validate sender address matches
         trade.transaction.from ===
           this._uniswapPairFactoryContext.ethereumAddress
       ) {
         if (
+          // validate that quote has changed
           trade.expectedConvertQuote !==
             this._currentTradeContext.expectedConvertQuote ||
+          // validate that route has changed
           trade.routeText !== this._currentTradeContext.routeText ||
+          // validate that fee has changed
           trade.liquidityProviderFee !==
             this._currentTradeContext.liquidityProviderFee ||
+          // validate that trade has expired
           this._currentTradeContext.tradeExpires >
             this._uniswapRouterFactory.generateTradeDeadlineUnixTime()
         ) {
