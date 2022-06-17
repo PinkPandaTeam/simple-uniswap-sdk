@@ -1,9 +1,9 @@
-import BigNumber from 'bignumber.js';
-import { Contract, ContractInterface, providers } from 'ethers';
-import { ErrorCodes } from './common/errors/error-codes';
-import { UniswapError } from './common/errors/uniswap-error';
-import { ChainId, ChainNames } from './enums/chain-id';
-import { CustomNetwork } from './factories/pair/models/custom-network';
+import BigNumber from "bignumber.js";
+import { Contract, ContractInterface, providers } from "ethers";
+import { ErrorCodes } from "./common/errors/error-codes";
+import { UniswapError } from "./common/errors/uniswap-error";
+import { ChainId, ChainNames } from "./enums/chain-id";
+import { CustomNetwork } from "./factories/pair/models/custom-network";
 
 export interface ChainIdAndProvider {
   chainId: ChainId;
@@ -22,7 +22,7 @@ export class EthersProvider {
     | providers.JsonRpcProvider
     | providers.InfuraProvider
     | providers.Web3Provider;
-  constructor(private _providerContext: ChainIdAndProvider | EthereumProvider) {
+  constructor(public _providerContext: ChainIdAndProvider | EthereumProvider) {
     const chainId = (<ChainIdAndProvider>this._providerContext).chainId;
     if (chainId) {
       const chainName = this.getChainName(chainId);
@@ -47,7 +47,7 @@ export class EthersProvider {
         .ethereumProvider;
       if (!ethereumProvider) {
         throw new UniswapError(
-          'Wrong ethers provider context',
+          "Wrong ethers provider context",
           ErrorCodes.wrongEthersProviderContext
         );
       }
@@ -120,7 +120,7 @@ export class EthersProvider {
     }
 
     throw new UniswapError(
-      'chainId can not be found on the provider',
+      "chainId can not be found on the provider",
       ErrorCodes.chainIdCanNotBeFound
     );
   }
@@ -179,6 +179,6 @@ export class EthersProvider {
    * Get the api key
    */
   private get _getApiKey(): string {
-    return '9aa3d95b3bc440fa88ea12eaa4456161';
+    return "9aa3d95b3bc440fa88ea12eaa4456161";
   }
 }
