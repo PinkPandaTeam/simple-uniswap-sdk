@@ -4,8 +4,9 @@ import { EthersProvider } from "../../../ethers-provider";
 import { UniswapContractContextV2 } from "../../../uniswap-contract-context/uniswap-contract-context-v2";
 
 export interface PairReserves {
-  tokenA: BigNumber;
-  tokenB: BigNumber;
+  byAddress: {
+    [key: string]: BigNumber;
+  };
   timestamp: number;
 }
 
@@ -32,15 +33,20 @@ export class UniswapPairContractV2 {
 
   public async getReserves(): Promise<PairReserves> {
     const resp = await this._uniswapPair.getReserves();
+    const token0Addr = await this._uniswapPair.token0();
+    const token1Addr = await this._uniswapPair.token1();
+
     return {
-      tokenA: new BigNumber(resp[0].toString()),
-      tokenB: new BigNumber(resp[1].toString()),
+      byAddress: {
+        [token0Addr]: new BigNumber(resp[0].toString()),
+        [token1Addr]: new BigNumber(resp[1].toString()),
+      },
       timestamp: resp[2],
     };
   }
 
   public subsribeSwap(listener: SwapListener) {
-    this._uniswapPair.addListener("Swap", listener);
+    this._uniswapPair.on("Swap", listener);
   }
 
   public removeSwapListeners() {

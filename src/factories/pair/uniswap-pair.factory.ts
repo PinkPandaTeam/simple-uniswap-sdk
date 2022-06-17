@@ -1,4 +1,3 @@
-import Big from "big.js";
 import BigNumber from "bignumber.js";
 import { Subject } from "rxjs";
 import { CoinGecko } from "../../coin-gecko";
@@ -26,12 +25,7 @@ import { TradeContext } from "./models/trade-context";
 import { TradeDirection } from "./models/trade-direction";
 import { Transaction } from "./models/transaction";
 import { UniswapPairFactoryContext } from "./models/uniswap-pair-factory-context";
-import { UniswapPairContractFactoryPublicV2 } from "./v2/uniswap-pair-contract.factory.public.v2";
-import {
-  PairReserves,
-  UniswapPairContractV2,
-} from "./v2/uniswap-pair-contract.v2";
-
+import { UniswapPairCalculator } from "./uniswap-pair.calculator";
 export class UniswapPairFactory {
   private _fromTokenFactory = new TokenFactory(
     this._uniswapPairFactoryContext.fromToken.contractAddress,
@@ -310,66 +304,18 @@ export class UniswapPairFactory {
     });
   }
 
-  private async getPairReserves(
-    fromToken: string,
-    toToken: string
-  ): Promise<PairReserves> {
-    const network = this._uniswapPairFactoryContext.ethersProvider.network();
-    const pairFactory = new UniswapPairContractFactoryPublicV2({
-      chainId: network.chainId,
-    });
+  public async newPairCalculator() {
+    const fromToken = this._uniswapPairFactoryContext.fromToken.contractAddress;
+    const toToken = this._uniswapPairFactoryContext.toToken.contractAddress;
 
-    const pairAddress = await pairFactory.getPair(fromToken, toToken);
-
-    const pairContract = new UniswapPairContractV2(
+    const calc = new UniswapPairCalculator(
       this._uniswapPairFactoryContext.ethersProvider,
-      pairAddress
+      fromToken,
+      toToken
     );
 
-    return pairContract.getReserves();
-  }
-
-  private calculateTrade(
-    poolA: BigNumber,
-    poolB: BigNumber,
-    tradeInput: BigNumber
-  ) {
-    const _poolA = new Big(poolA.toString());
-    const _poolB = new Big(poolB.toString());
-    const input = new Big(tradeInput.toString());
-
-    // constant prduct is the starting value of the A side of the pool
-    const CP = new Big(_poolA.toString());
-
-    const marketPrice = _poolA.div(_poolB);
-    const newPoolA = _poolA.add(input);
-    const newPoolB = CP.div(newPoolA).mul(_poolB);
-    const recieve = _poolB.sub(newPoolB);
-    const newMarketPrice = input.div(recieve);
-
-    const priceDifference = newMarketPrice.sub(marketPrice);
-
-    const priceImpact = priceDifference.div(marketPrice).mul(100);
-
-    return {
-      oldMarketPrice: marketPrice,
-      newMarketPrice: newMarketPrice,
-      recieve: recieve,
-      priceImpact: priceImpact,
-    };
-  }
-
-  public async newTradeCalculator(fromToken: string, toToken: string) {
-    const reserves = await this.getPairReserves(fromToken, toToken);
-    return (from: string, to: string, tradeInput: BigNumber) => {
-      // you can change the order of the token addresses
-      // but cannot use different tokens
-      if (!reserves[from] || !reserves[to]) {
-        throw new Error("unknown token address");
-      }
-
-      this.calculateTrade(reserves[from], reserves[to], tradeInput);
-    };
+    await calc.init();
+    return calc;
   }
 
   /**
